@@ -1,0 +1,291 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+# Assignment 0
+
+```{r setup, include = FALSE}
+setwd("C:/Users/joaom/Desktop/IO/")
+
+rm(list=ls())
+
+library(tidyverse) #for data manipulation
+library(haven) #for reading .dta
+library(Statamarkdown)
+```
+## Importing data
+### Stata
+Let's start importing data, naming variables and creating new ones where necessary.
+```{stata}
+clear
+
+use "C:\Users\joaom\Desktop\IO\NEW7080.dta"
+
+rename v2 AGEQ
+rename v4 EDUC
+rename v5 ENOCENT
+rename v6 ESOCENT
+rename v9 LWKLYWGE
+rename v10 MARRIED
+rename v11 MIDATL
+rename v12 MT
+rename v13 NEWENG
+rename v18 QOB
+rename v19 RACE
+rename v20 SMSA
+rename v21 SOATL
+rename v24 WNOCENT
+rename v25 WSOCENT
+rename v27 YOB
+
+drop v*
+
+qui keep if YOB >= 1920 & YOB <= 1929
+
+gen AGEQSQ= AGEQ^2
+gen EDUC12 = EDUC>=12
+
+qui tab QOB, gen(QT)
+
+forvalues year = 1920/1929{
+    gen YR`year' = (YOB == `year')
+  forvalues quarter = 1/4{
+	gen QT`quarter'_YR`year' = (YOB == `year') & (QOB == `quarter')
+  }
+}
+qui save "C:\Users\joaom\Desktop\IO\temp.dta"
+```
+### R
+
+```{r dataimport}
+data <- read_dta("NEW7080.dta") %>%
+  select(age = v1,
+         ageq = v2,
+         educ = v4,
+         enocent = v5,
+         esocent = v6,
+         lwklywge = v9,
+         married = v10,
+         midatl = v11,
+         mt = v12,
+         neweng = v13,
+         census = v16,
+         qob = v18,
+         race = v19,
+         smsa = v20,
+         soatl = v21,
+         wnocent = v24,
+         wsocent = v25,
+         yob = v27) %>%
+  mutate(cohort = if_else(40<=yob & yob < 50, "40-49",
+                  if_else(30<=yob & yob < 40, "30-39",
+                          "20-29")),
+         ageqsq = ageq^2,
+         cons = 1) %>%
+  filter(cohort == "20-29")
+
+
+for (quarter in (1:4)) {
+  for(year in (1920:1929)){
+    data[str_c("qt",quarter,"yr",year)] <- if_else(data$yob == year & data$qob == quarter, 1, 0)
+    
+  }
+}
+
+for(year in (1920:1929)){
+  data[str_c("yr",year)] <- if_else(data$yob == year, 1, 0)
+}
+```
+
+## Exercise 1
+Now run the regressions in Stata.
+
+```{stata}
+use "C:\Users\joaom\Desktop\IO\temp.dta"
+reg LWKLYWGE EDUC i.YOB
+reg LWKLYWGE EDUC i.YOB AGEQ AGEQSQ
+reg LWKLYWGE EDUC RACE MARRIED SMSA NEWENG MIDATL ENOCENT WNOCENT ///
+  SOATL ESOCENT WSOCENT MT i.YOB
+reg LWKLYWGE EDUC RACE MARRIED SMSA NEWENG MIDATL ENOCENT WNOCENT ///
+  SOATL ESOCENT WSOCENT MT i.YOB AGEQ AGEQSQ
+
+
+ivregress 2sls LWKLYWGE i.YOB (EDUC = QT1_YR* QT2_YR* QT3_YR*)
+ivregress 2sls LWKLYWGE i.YOB AGEQ AGEQSQ (EDUC = QT1_YR* QT2_YR* QT3_YR*)
+ivregress 2sls LWKLYWGE i.YOB RACE MARRIED SMSA NEWENG MIDATL ENOCENT /// 
+	WNOCENT SOATL ESOCENT WSOCENT MT (EDUC = QT1_YR* QT2_YR* QT3_YR*)
+ivregress 2sls LWKLYWGE i.YOB RACE MARRIED SMSA NEWENG MIDATL ENOCENT ///
+	WNOCENT SOATL ESOCENT WSOCENT MT AGEQ AGEQSQ (EDUC = QT1_YR* QT2_YR* QT3_YR*)
+```
+
+## Exercise 2
+Here I define a function for OLS. It converts the inputs into matrices so we can pass dataframes directly.
+
+```{r ols}
+OLS <- function(X,Y){
+  
+  X <- as.matrix(X)
+  Y <- as.matrix(Y)
+  
+  n = length(Y)
+  k = dim(X)[2]
+
+  beta <- solve(t(X) %*% X) %*% t(X) %*% Y
+  
+  fitted <- X %*% beta
+  residual <- Y - fitted
+  sigma <- sum(residual^2) / (n - k)
+  var <- sigma * solve(t(X) %*% X)
+  se <- sqrt(diag(var))
+  
+  results <- data.frame(beta = c(beta), se = se)
+  
+  return(results)
+}
+```
+
+Here I do the same for IV.
+
+```{r iv}
+IV <- function(X,Z,Y){
+  
+  X <- as.matrix(X)
+  Y <- as.matrix(Y)
+  Z <- as.matrix(Z)
+  
+  n = length(Y)
+  k = dim(X)[2]
+  
+  beta_fs <- solve(t(Z) %*% Z) %*% t(Z) %*% X
+  
+  X_dot <- Z %*% beta_fs
+  
+  beta <- solve(t(X_dot) %*% X) %*% t(X_dot) %*% Y
+  
+  fitted <- X %*% beta
+  residual <- Y - fitted
+  sigma <- sum(residual^2) / (n - k)
+  var <- sigma * solve(t(X_dot) %*% X_dot) 
+  se <- sqrt(diag(var))
+  
+  results <- data.frame(beta = c(beta), se = se)
+  return(results)
+}
+```
+
+Finally, select some data and print the results. First for OLS.
+
+```{r olsresults}
+Y <- data %>% select(lwklywge)
+
+Xlist <- list(data %>% select(educ, yr1920:yr1928, cons),
+              data %>% select(educ, ageq, ageqsq, yr1920:yr1928, cons),
+              data %>% select(educ, race, married, smsa, neweng, midatl,enocent, 
+                              wnocent, soatl,esocent, wsocent, mt, yr1920:yr1928, cons),
+              data %>% select(educ, ageq, ageqsq, race, married, smsa, 
+                              neweng, midatl, enocent, wnocent, soatl,
+                              esocent, wsocent, mt, yr1920:yr1928, cons)
+              )
+
+tableIVa <- map(Xlist, OLS, Y)
+
+print(tableIVa)
+```
+
+Now for IV. Note that the X variables are the same as before. For the second and fourth columns, we omit some variables due to collinearity.
+
+```{r ivresults}
+Zlist <- list(data %>% select(qt1yr1920:qt4yr1929),
+              data %>% select(ageqsq, qt1yr1920:qt4yr1927, cons),
+              data %>% select(race, married, smsa, neweng, midatl, enocent, wnocent,
+                              soatl,esocent, wsocent, mt, qt1yr1920:qt4yr1928, cons),
+              data %>% select(ageqsq, race, married, smsa, 
+                              neweng, midatl, enocent, wnocent, soatl,
+                              esocent, wsocent, mt, qt1yr1920:qt4yr1927, cons)
+              )
+
+tableIVb <- map2(Xlist, Zlist, IV, Y)
+
+print(tableIVb)
+
+```
+In both cases, the results are the same as the ones obtained in Stata.
+
+
+## Exercise 3
+Now lets do the logit, first in Stata. 
+
+```{stata}
+use "C:\Users\joaom\Desktop\IO\temp.dta"
+logit EDUC12 QT1 AGEQ AGEQSQ 
+margins, dydx(QT1)
+```
+
+## Exercise 4
+Now let's define a function in R, using Newton's method.
+
+```{r Logit}
+Logit <- function(X,Y, precision = 1e-8, maxiter = 1000){
+
+  X <- as.matrix(X)
+  Y <- as.matrix(Y)
+  
+  beta_new <- solve(t(X) %*% X) %*% t(X) %*% Y #start with ols as a guess
+  
+  p <- function(z) {1/(1+exp(-z))}
+
+  iter <- 0
+  while (iter < maxiter) {
+    beta_old <- beta_new
+    
+    X_tilde <- X* (p(X%*%beta_old) %*% matrix(1,1,dim(X)[2]))
+    
+    beta_new <- beta_old + solve(t(X)%*%X_tilde) %*% t(X) %*% (Y - p(X%*%beta_old))
+    iter <- iter + 1
+    if (sum(abs(beta_new - beta_old)) < precision) {
+      break
+    }
+  }
+  
+  return(beta_new)
+}
+```
+
+And here's a function to get the partial effects of the first regressor. Since the usual procedure depends on whether or not it is a binary variable, the function can compute it either way.
+
+```{r APE}
+getPartialEffect <- function(beta, X, binary = FALSE) {
+  P <- function(x){exp(x)/(1+exp(x))}
+  if(binary == TRUE){
+    X1 <- X %>% mutate(one = 1) %>% select(one, 2:length(X)) %>% as.matrix()
+    P1 <- P(X1%*%beta)
+    X0 <- X %>% mutate(zero = 0) %>% select(zero, 2:length(X)) %>% as.matrix()
+    P0 <- P(X0%*%beta)
+    APE <- mean(P1 - P0)
+    return(APE)
+  }
+  if(binary == FALSE){
+    X <- X  %>% as.matrix()
+    APE <- mean(beta[1]*P(X%*%beta))
+    return(APE)
+  } 
+}
+```
+
+Get data and print results.
+
+```{r logitresults}
+Y <- data %>% mutate(educ12 = if_else(educ >= 12,1,0)) %>% select(educ12)
+X <- data %>% mutate(qtr1 = if_else(qob == 1, 1, 0)) %>% select(qtr1, ageq, ageqsq, cons)
+
+beta <- Logit(X,Y)
+print(beta)
+
+APE <- getPartialEffect(beta, X, binary = T)
+print(APE)
+
+```
+

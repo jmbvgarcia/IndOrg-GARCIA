@@ -45,8 +45,8 @@ IV <- function(X,Z,Y,C=data.frame()){
   beta <- solve(t(X_dot) %*% X) %*% t(X_dot) %*% Y
   
   fitted <- X %*% beta
-  residual <- Y - fitted
-  sigma <- sum(residual^2) / (n - k)
+  residuals <- Y - fitted
+  sigma <- sum(residuals^2) / (n - k)
   
   var <- sigma * solve(t(X_dot) %*% X_dot) 
   
@@ -54,8 +54,8 @@ IV <- function(X,Z,Y,C=data.frame()){
   
   results <- list(beta = beta,
                   se = se, 
-                  fitted = fitted, 
-                  residual = residual,
+                  fitted = as.numeric(fitted), 
+                  residuals = as.numeric(residuals),
                   beta_fs = beta_fs)
   
   return(results)
@@ -69,3 +69,16 @@ dummyGen <- function(df, x, label = "d_"){
   df <- bind_cols(df,d)
   return(df)
 }
+
+getCI <- function(reg){
+  c(lower = as.numeric(reg[["beta"]][1] - 1.98*reg[["se"]][1]), 
+    upper = as.numeric(reg[["beta"]][1] + 1.98*reg[["se"]][1]))
+}
+
+computeArea <- function(start,end,fun,precision = 10000){
+  step_grid <- (end-start)*(1:precision)/precision
+  rectangle_area <- fun(start + step_grid)*(end-start)/precision
+  area <- sum(rectangle_area)
+  return(area)
+}
+  

@@ -1,14 +1,17 @@
 
 sample <- read_dta("annual_regression_data.dta") %>% 
   filter(!is.na(hug + real_oilprice + taxin_gas_price)) %>%  #exclude missing values
-  dummyGen("year", "Y_") %>%
   dummyGen("state", "S_") %>% 
   mutate(cons = 1, 
-         ln_quantity = log(hug/apop_adj),
-         ln_price_demand = log(taxin_gas_price),
-         ln_price_supply = log((taxin_gas_price-gas_tax_all)),
+         quantity = hug,
+         ln_quantity = log(quantity), #consumption in thousand gallons
+         price_demand = taxin_gas_price/cpi87, # price in dollars per gallon
+         ln_price_demand = log(price_demand),
+         price_supply = (taxin_gas_price-gas_tax_all)/cpi87,
+         ln_price_supply = log(price_supply), 
          ln_oil = log(real_oilprice),
-         ln_tax = log(gas_tax_all),
-         time_trend = year-2008,
-         time_trend_sq = time_trend^2) %>%
-  select(-`S_Rhode Island`)
+         time_trend = year-2008, # to make 2008 the reference year
+         time_trend2 = time_trend^2,
+         time_trend3 = time_trend^3) %>%
+  select(-`S_Rhode Island`) #to make RI the reference state
+

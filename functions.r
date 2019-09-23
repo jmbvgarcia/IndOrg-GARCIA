@@ -71,8 +71,9 @@ dummyGen <- function(df, x, label = "d_"){
 }
 
 getCI <- function(reg){
-  c(lower = as.numeric(reg[["beta"]][1] - 1.98*reg[["se"]][1]), 
-    upper = as.numeric(reg[["beta"]][1] + 1.98*reg[["se"]][1]))
+  c(lower_bound = as.numeric(reg[["beta"]][1] - 1.98*reg[["se"]][1]),
+    point_estimate = as.numeric(reg[["beta"]][1]),
+    upper_bound = as.numeric(reg[["beta"]][1] + 1.98*reg[["se"]][1]))
 }
 
 computeArea <- function(start,end,fun,precision = 10000){
